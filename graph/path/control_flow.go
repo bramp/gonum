@@ -9,12 +9,15 @@ import "gonum.org/v1/gonum/graph"
 // Dominators returns a dominator tree for all nodes in the flow graph
 // g starting from the given root node.
 func Dominators(root graph.Node, g graph.Directed) DominatorTree {
-	// The algorithm used here is essentially the Lengauer and Tarjan
-	// algorithm described in https://doi.org/10.1145%2F357062.357071
+	// The algorithm used here is essentially the sophisticated
+	// Lengauer and Tarjan algorithm described in
+	// https://doi.org/10.1145%2F357062.357071
 
 	lt := lengauerTarjan{
 		indexOf: make(map[int64]int),
+		base:    ltNode{semi: -1},
 	}
+	lt.base.label = &lt.base
 
 	// step 1.
 	lt.dfs(g, root)
@@ -80,6 +83,12 @@ type lengauerTarjan struct {
 	// number of the node in the Lengauer-
 	// Tarjan algorithm.
 	indexOf map[int64]int
+
+	// base is the base label for balanced
+	// tree path compression used in the
+	// sophisticated Lengauer-Tarjan
+	// algorith,
+	base ltNode
 }
 
 // ltNode is a graph node with accounting for the Lengauer-Tarjan
@@ -103,6 +112,14 @@ type ltNode struct {
 	// (ii) After the semidominator of w is computed, semi
 	//      is the number of the semidominator of w.
 	semi int
+
+	// size is the tree size of w used in the
+	// sophisticated algorithm.
+	size int
+
+	// child is the child node of w used in the
+	// sophisticated algorithm.
+	child *ltNode
 
 	// bucket is the set of vertices whose
 	// semidominator is w.
@@ -135,6 +152,8 @@ func (lt *lengauerTarjan) dfs(g graph.Directed, v graph.Node) {
 	ltv := &ltNode{
 		node:   v,
 		semi:   i,
+		size:   1,
+		child:  &lt.base,
 		bucket: make(map[*ltNode]struct{}),
 	}
 	ltv.label = ltv
@@ -176,15 +195,37 @@ func (lt *lengauerTarjan) compress(v *ltNode) {
 // eval is the Lengauer-Tarjan EVAL function.
 func (lt *lengauerTarjan) eval(v *ltNode) *ltNode {
 	if v.ancestor == nil {
-		return v
+		return v.label
 	}
 	lt.compress(v)
-	return v.label
+	if v.ancestor.label.semi >= v.label.semi {
+		return v.label
+	}
+	return v.ancestor.label
 }
 
 // link is the Lengauer-Tarjan LINK procedure.
 func (*lengauerTarjan) link(v, w *ltNode) {
-	w.ancestor = v
+	s := w
+	for w.label.semi < s.child.label.semi {
+		if s.size+s.child.child.size >= 2*s.child.size {
+			s.child.ancestor = s
+			s.child = s.child.child
+		} else {
+			s.child.size = s.size
+			s.ancestor = s.child
+			s = s.child
+		}
+	}
+	s.label = w.label
+	v.size += w.size
+	if v.size < 2*w.size {
+		s, v.child = v.child, s
+	}
+	for s != nil {
+		s.ancestor = v
+		s = s.child
+	}
 }
 
 // DominatorTree is a flow graph dominator tree.
